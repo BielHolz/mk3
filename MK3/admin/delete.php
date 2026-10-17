@@ -1,1 +1,34 @@
-<?php require 'common.php';admin_required();if($_SERVER['REQUEST_METHOD']!=='POST'){http_response_code(405);exit;}check_csrf();$id=filter_var($_POST['id']??null,FILTER_VALIDATE_INT);if(!$id){http_response_code(400);exit('ID inválido');}$s=db()->prepare('SELECT path FROM photos WHERE vehicle_id=?');$s->execute([$id]);$paths=$s->fetchAll(PDO::FETCH_COLUMN);db()->prepare('DELETE FROM vehicles WHERE id=?')->execute([$id]);foreach($paths as $p){if(str_starts_with($p,'uploads/'))@unlink(dirname(__DIR__).'/'.$p);}admin_log('delete-vehicle',(string)$id);go('index.php');
+<?php
+require "common.php";
+require dirname(__DIR__) . "/app/media.php";
+admin_required();
+require_post();
+$id = filter_var(input($_POST, "id"), FILTER_VALIDATE_INT, [
+    "options" => ["min_range" => 1],
+]);
+if (!$id) {
+    abort_request(400, "Identificador inválido.");
+}
+$pdo = db();
+$pdo->beginTransaction();
+try {
+    $s = $pdo->prepare("SELECT id FROM vehicles WHERE id=? FOR UPDATE");
+    $s->execute([$id]);
+    if (!$s->fetchColumn()) {
+        $pdo->rollBack();
+        abort_request(404, "Veículo não encontrado.");
+    }
+    $paths = array_column(car_photos($id), "path");
+    $pdo->prepare("DELETE FROM vehicles WHERE id=?")->execute([$id]);
+    admin_log("delete-vehicle", "#" . $id);
+    $pdo->commit();
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    throw $e;
+}
+foreach ($paths as $path) {
+    remove_image($path);
+}
+go("index.php");

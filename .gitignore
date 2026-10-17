@@ -1,0 +1,4 @@
+MK3/app/config.local.php
+MK3/app/installed.lock
+MK3/uploads/*
+!MK3/uploads/.htaccess

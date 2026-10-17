@@ -1,20 +1,126 @@
-<?php require 'common.php';admin_required();if($_SERVER['REQUEST_METHOD']!=='POST'){http_response_code(405);exit;}check_csrf();$id=filter_var($_POST['vehicle_id']??null,FILTER_VALIDATE_INT);if(!$id){http_response_code(400);exit('ID inválido');}$s=db()->prepare('SELECT id FROM vehicles WHERE id=?');$s->execute([$id]);if(!$s->fetch()){http_response_code(404);exit('Veículo não encontrado');}$action=$_POST['action']??'';$count=db()->prepare('SELECT COUNT(*) FROM photos WHERE vehicle_id=?');$count->execute([$id]);$n=(int)$count->fetchColumn();
-if($action==='upload'){
- if($n>=12){http_response_code(400);exit('Limite de 12 fotos por veículo.');}
- $file=$_FILES['photo']??null;if(!$file||$file['error']!==UPLOAD_ERR_OK||$file['size']>5242880||$file['size']<=0||!is_uploaded_file($file['tmp_name'])){http_response_code(400);exit('Upload inválido ou maior que 5 MB.');}
- $mime=(new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);$types=['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp'];if(!isset($types[$mime])||@getimagesize($file['tmp_name'])===false){http_response_code(400);exit('Formato de imagem inválido.');}
- $info=@getimagesize($file['tmp_name']);if(($info[0]??0)>8000||($info[1]??0)>8000){http_response_code(400);exit('Resolução excessiva.');}
- $path='uploads/'.bin2hex(random_bytes(16)).'.'.$types[$mime];$full=dirname(__DIR__).'/'.$path;
- // Reprocessa a imagem com GD para descartar metadados e conteúdo extra.
- if(!extension_loaded('gd')){http_response_code(500);exit('Ative a extensão GD no php.ini.');}
- $load=match($mime){'image/jpeg'=>'imagecreatefromjpeg','image/png'=>'imagecreatefrompng','image/webp'=>'imagecreatefromwebp'};
- $save=match($mime){'image/jpeg'=>'imagejpeg','image/png'=>'imagepng','image/webp'=>'imagewebp'};
- $im=@$load($file['tmp_name']);if(!$im){http_response_code(400);exit('Imagem corrompida.');}
- $ok=$mime==='image/jpeg'?$save($im,$full,85):$save($im,$full);imagedestroy($im);if(!$ok){http_response_code(500);exit('Não foi possível salvar a imagem.');}
- @chmod($full,0644);$s=db()->prepare('INSERT INTO photos(vehicle_id,path,position) VALUES(?,?,?)');$s->execute([$id,$path,$n+1]);admin_log('upload-photo',$path);
-}elseif($action==='remove'||$action==='cover'){
- $pid=filter_var($_POST['photo_id']??null,FILTER_VALIDATE_INT);$s=db()->prepare('SELECT * FROM photos WHERE id=? AND vehicle_id=?');$s->execute([$pid,$id]);$p=$s->fetch();if(!$p){http_response_code(404);exit('Foto não encontrada');}
- if($action==='remove') {db()->prepare('DELETE FROM photos WHERE id=?')->execute([$pid]);if(str_starts_with($p['path'],'uploads/'))@unlink(dirname(__DIR__).'/'.$p['path']);admin_log('remove-photo',(string)$pid);}
- else{db()->prepare('UPDATE photos SET position=position+1 WHERE vehicle_id=?')->execute([$id]);db()->prepare('UPDATE photos SET position=0 WHERE id=?')->execute([$pid]);admin_log('cover-photo',(string)$pid);}
-}else{http_response_code(400);exit('Ação inválida');}
-go('edit.php?id='.$id);
+<?php
+require "common.php";
+require dirname(__DIR__) . "/app/media.php";
+admin_required();
+require_post();
+$id = filter_var(input($_POST, "vehicle_id"), FILTER_VALIDATE_INT, [
+    "options" => ["min_range" => 1],
+]);
+if (!$id) {
+    abort_request(400, "Identificador inválido.");
+}
+$action = input($_POST, "action");
+$pid = (int) input($_POST, "photo_id", "0");
+$pdo = db();
+$created = [];
+$remove = [];
+try {
+    $pdo->beginTransaction();
+    $s = $pdo->prepare("SELECT id FROM vehicles WHERE id=? FOR UPDATE");
+    $s->execute([$id]);
+    if (!$s->fetchColumn()) {
+        throw new InvalidArgumentException("Veículo não encontrado.");
+    }
+    $photos = car_photos($id);
+    $photo = null;
+    foreach ($photos as $p) {
+        if ((int) $p["id"] === $pid) {
+            $photo = $p;
+        }
+    }
+    if (
+        in_array($action, ["replace", "remove", "cover", "up", "down"], true) &&
+        !$photo
+    ) {
+        throw new InvalidArgumentException(
+            "Fotografia não encontrada neste veículo.",
+        );
+    }
+    if ($action === "upload") {
+        $files = upload_files("photos");
+        if (!$files) {
+            $files = upload_files("photo");
+        }
+        if (!$files || count($photos) + count($files) > 12) {
+            throw new InvalidArgumentException(
+                "Escolha fotografias respeitando o limite de 12 por veículo.",
+            );
+        }
+        $position = $photos ? max(array_column($photos, "position")) + 1 : 0;
+        foreach ($files as $file) {
+            $path = upload_image($file);
+            $created[] = $path;
+            $pdo->prepare(
+                "INSERT INTO photos(vehicle_id,path,position) VALUES(?,?,?)",
+            )->execute([$id, $path, $position++]);
+        }
+    } elseif ($action === "replace") {
+        $files = upload_files("photo");
+        if (count($files) !== 1) {
+            throw new InvalidArgumentException(
+                "Escolha uma fotografia para substituir.",
+            );
+        }
+        $path = upload_image($files[0]);
+        $created[] = $path;
+        $pdo->prepare(
+            "UPDATE photos SET path=? WHERE id=? AND vehicle_id=?",
+        )->execute([$path, $pid, $id]);
+        $remove[] = $photo["path"];
+    } elseif ($action === "remove") {
+        $pdo->prepare(
+            "DELETE FROM photos WHERE id=? AND vehicle_id=?",
+        )->execute([$pid, $id]);
+        $remove[] = $photo["path"];
+    } elseif (in_array($action, ["cover", "up", "down"], true)) {
+        $ids = array_map("intval", array_column($photos, "id"));
+        $index = array_search($pid, $ids, true);
+        if ($action === "cover") {
+            array_splice($ids, $index, 1);
+            array_unshift($ids, $pid);
+        } else {
+            $next = $index + ($action === "up" ? -1 : 1);
+            if (isset($ids[$next])) {
+                [$ids[$index], $ids[$next]] = [$ids[$next], $ids[$index]];
+            }
+        }
+        $s = $pdo->prepare(
+            "UPDATE photos SET position=? WHERE id=? AND vehicle_id=?",
+        );
+        foreach ($ids as $position => $photoId) {
+            $s->execute([$position, $photoId, $id]);
+        }
+    } else {
+        throw new InvalidArgumentException("Operação de fotografia inválida.");
+    }
+    admin_log(
+        "photo-" . $action,
+        "#" . $id . " • foto " . $pid . " • " . count($created) . " arquivo(s)",
+    );
+    $pdo->commit();
+    foreach ($remove as $path) {
+        remove_image($path);
+    }
+    go("edit.php?id=" . $id . "&photos=1#fotos");
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    foreach ($created as $path) {
+        remove_image($path);
+    }
+    if (!($e instanceof InvalidArgumentException)) {
+        error_log("MK3 upload: " . get_class($e));
+    }
+    http_response_code($e instanceof InvalidArgumentException ? 422 : 500);
+    admin_top("Não foi possível atualizar a galeria");
+    flash_error(
+        $e instanceof InvalidArgumentException
+            ? $e->getMessage()
+            : "Falha ao gravar as fotografias. Nenhuma alteração foi salva. Verifique as permissões e tente novamente.",
+    );
+    echo '<a class="button outline" href="edit.php?id=' .
+        $id .
+        '#fotos">Voltar à galeria</a>';
+    admin_bottom();
+}
