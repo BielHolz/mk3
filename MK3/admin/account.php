@@ -25,10 +25,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 ->prepare(
                     "UPDATE users SET password_hash=?,session_version=session_version+1 WHERE id=?",
                 )
-                ->execute([
-                    password_hash($new, PASSWORD_DEFAULT),
-                    $_SESSION["admin_id"],
-                ]);
+                ->execute([hash_password($new), $_SESSION["admin_id"]]);
             admin_log("change-password");
             db()->commit();
         } catch (Throwable $e) {

@@ -60,7 +60,7 @@ admin_top("Visão geral");
     as $r
 ): ?><tr><td><div class="table-vehicle"><img src="../<?= h(
     photo_path($r["cover"]),
-) ?>" width="88" height="60" alt=""><div><strong><?= h(
+) ?>" width="96" height="54" alt=""><div><strong><?= h(
     $r["title"],
 ) ?></strong><small><?= h(vehicle_year($r)) ?> • #<?= (int) $r[
      "id"

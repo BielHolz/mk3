@@ -77,6 +77,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     } catch (InvalidArgumentException $e) {
         http_response_code(422);
         $error = $e->getMessage();
+        $_POST["featured"] = input($_POST, "featured") === "1" ? "1" : "0";
         $v = array_replace(
             $v,
             array_map(fn($x) => is_scalar($x) ? (string) $x : "", $_POST),
@@ -149,13 +150,13 @@ if ($id):
     $photos,
 ) ?> / 12</span></div><?php if (
      isset($_GET["photos"])
- ): ?><div class="alert ok" role="status">Galeria atualizada.</div><?php endif; ?><p class="fineprint">Até 12 fotos, 5 MB e 16 megapixels por arquivo. JPG, PNG ou WebP. As imagens são reprocessadas e otimizadas. A primeira foto é a capa.</p><form method="post" action="photo.php" enctype="multipart/form-data" class="upload-form"><?= token_field() ?><input type="hidden" name="vehicle_id" value="<?= $id ?>"><input type="hidden" name="action" value="upload"><label>Adicionar várias fotos<input type="file" name="photos[]" accept="image/jpeg,image/png,image/webp" multiple required data-preview="upload-preview"></label><div id="upload-preview" class="upload-preview" aria-live="polite"></div><button class="button outline">Enviar fotografias</button></form><div class="photo-grid"><?php foreach (
+ ): ?><div class="alert ok" role="status">Galeria atualizada.</div><?php endif; ?><p class="fineprint">Até 12 fotos, 5 MB e 16 megapixels por arquivo. JPG, PNG ou WebP. As imagens são convertidas para WebP em 16:9, sem distorcer ou cortar o veículo. A primeira foto é a capa. Você pode organizar a seleção antes de enviar.</p><form method="post" action="photo.php" enctype="multipart/form-data" class="upload-form"><?= token_field() ?><input type="hidden" name="vehicle_id" value="<?= $id ?>"><input type="hidden" name="action" value="upload"><label>Adicionar várias fotos<input type="file" name="photos[]" accept="image/jpeg,image/png,image/webp" multiple required data-preview="upload-preview" data-max-files="<?= max(0, 12 - count($photos)) ?>"></label><div id="upload-preview" class="upload-preview" aria-live="polite"></div><button class="button outline">Enviar fotografias</button></form><div class="photo-grid"><?php foreach (
     $photos
     as $i => $photo
 ): ?><article class="photo-tile"><img src="../<?= h(
-    photo_path($photo["path"]),
+    public_thumbnail($photo["path"]),
 ) ?>" alt="Fotografia <?= $i +
-    1 ?>" width="400" height="300"><span class="pill"><?= $i === 0
+    1 ?>" width="480" height="270"><span class="pill"><?= $i === 0
     ? "Capa"
     : "Foto " . ($i + 1) ?></span><div class="photo-actions"><?php foreach (
     [

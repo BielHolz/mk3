@@ -1,7 +1,10 @@
 <?php
 // Aceita apenas imagens raster decodificadas; regrava sem metadados em WebP.
-function upload_image(array $file, int $maxWidth = 1800): string
-{
+function upload_image(
+    array $file,
+    int $maxWidth = 1800,
+    bool $vehiclePhoto = false,
+): string {
     if (
         ($file["error"] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK ||
         ($file["size"] ?? 0) <= 0 ||
@@ -14,7 +17,7 @@ function upload_image(array $file, int $maxWidth = 1800): string
         );
     }
     $tmp = $file["tmp_name"];
-    $mime = new finfo(FILEINFO_MIME_TYPE)->file($tmp);
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($tmp);
     $info = @getimagesize($tmp);
     if (
         !$info ||
@@ -41,6 +44,7 @@ function upload_image(array $file, int $maxWidth = 1800): string
             "Não foi possível decodificar a fotografia.",
         );
     }
+    $image = orient_image($image, $tmp, $mime);
     $path = "uploads/" . bin2hex(random_bytes(16)) . ".webp";
     $full = dirname(__DIR__) . "/" . $path;
     $thumb = thumbnail_path($path);
@@ -49,24 +53,60 @@ function upload_image(array $file, int $maxWidth = 1800): string
             [$full => $maxWidth, dirname(__DIR__) . "/" . $thumb => 480]
             as $destination => $width
         ) {
-            $ratio = min(1, $width / imagesx($image), $width / imagesy($image));
-            $w = max(1, (int) round(imagesx($image) * $ratio));
-            $h = max(1, (int) round(imagesy($image) * $ratio));
-            $output = imagecreatetruecolor($w, $h);
-            imagealphablending($output, false);
-            imagesavealpha($output, true);
-            imagecopyresampled(
-                $output,
-                $image,
-                0,
-                0,
-                0,
-                0,
-                $w,
-                $h,
-                imagesx($image),
-                imagesy($image),
-            );
+            if ($vehiclePhoto) {
+                // Canvas 16:9: preserve a foto inteira, sem esticar ou recortar o carro.
+                $limit = max(16, (int) floor($width / 16) * 16);
+                $required = max(imagesx($image), (imagesy($image) * 16) / 9);
+                $w = min($limit, max(16, (int) ceil($required / 16) * 16));
+                $h = (int) (($w * 9) / 16);
+                $ratio = min(1, $w / imagesx($image), $h / imagesy($image));
+                $contentW = max(1, (int) round(imagesx($image) * $ratio));
+                $contentH = max(1, (int) round(imagesy($image) * $ratio));
+                $output = imagecreatetruecolor($w, $h);
+                imagefill(
+                    $output,
+                    0,
+                    0,
+                    imagecolorallocate($output, 20, 21, 24),
+                );
+                imagealphablending($output, true);
+                imagecopyresampled(
+                    $output,
+                    $image,
+                    (int) floor(($w - $contentW) / 2),
+                    (int) floor(($h - $contentH) / 2),
+                    0,
+                    0,
+                    $contentW,
+                    $contentH,
+                    imagesx($image),
+                    imagesy($image),
+                );
+            } else {
+                // Logos e imagens institucionais mantêm a proporção e a transparência.
+                $ratio = min(
+                    1,
+                    $width / imagesx($image),
+                    $width / imagesy($image),
+                );
+                $w = max(1, (int) round(imagesx($image) * $ratio));
+                $h = max(1, (int) round(imagesy($image) * $ratio));
+                $output = imagecreatetruecolor($w, $h);
+                imagealphablending($output, false);
+                imagesavealpha($output, true);
+                imagecopyresampled(
+                    $output,
+                    $image,
+                    0,
+                    0,
+                    0,
+                    0,
+                    $w,
+                    $h,
+                    imagesx($image),
+                    imagesy($image),
+                );
+            }
             try {
                 if (!imagewebp($output, $destination, 84)) {
                     throw new RuntimeException(
@@ -122,4 +162,36 @@ function upload_files(string $key): array
         }
     }
     return $files;
+}
+
+function orient_image(GdImage $image, string $source, string $mime): GdImage
+{
+    if ($mime !== "image/jpeg" || !function_exists("exif_read_data")) {
+        return $image;
+    }
+    $metadata = @exif_read_data($source, "IFD0", true, false);
+    $orientation = (int) ($metadata["IFD0"]["Orientation"] ?? 1);
+    $angle = match ($orientation) {
+        3 => 180,
+        5, 6 => -90,
+        7, 8 => 90,
+        default => 0,
+    };
+    if ($angle !== 0) {
+        $rotated = imagerotate($image, $angle, 0);
+        if ($rotated === false) {
+            throw new InvalidArgumentException(
+                "Não foi possível orientar a fotografia.",
+            );
+        }
+        imagedestroy($image);
+        $image = $rotated;
+    }
+    if (in_array($orientation, [2, 5, 7], true)) {
+        imageflip($image, IMG_FLIP_HORIZONTAL);
+    }
+    if ($orientation === 4) {
+        imageflip($image, IMG_FLIP_VERTICAL);
+    }
+    return $image;
 }

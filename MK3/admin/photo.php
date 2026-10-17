@@ -48,7 +48,7 @@ try {
         }
         $position = $photos ? max(array_column($photos, "position")) + 1 : 0;
         foreach ($files as $file) {
-            $path = upload_image($file);
+            $path = upload_image($file, 1920, true);
             $created[] = $path;
             $pdo->prepare(
                 "INSERT INTO photos(vehicle_id,path,position) VALUES(?,?,?)",
@@ -61,7 +61,7 @@ try {
                 "Escolha uma fotografia para substituir.",
             );
         }
-        $path = upload_image($files[0]);
+        $path = upload_image($files[0], 1920, true);
         $created[] = $path;
         $pdo->prepare(
             "UPDATE photos SET path=? WHERE id=? AND vehicle_id=?",

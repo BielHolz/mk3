@@ -26,6 +26,7 @@ if (!base || !["localhost", "127.0.0.1"].includes(new URL(base).hostname))
   const page = await context.newPage();
   const errors = [];
   const ids = [];
+  let serverVerified = false;
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (msg) => {
     if (msg.type() === "error" && !msg.text().includes("favicon"))
@@ -83,13 +84,72 @@ if (!base || !["localhost", "127.0.0.1"].includes(new URL(base).hostname))
       "prévia de upload múltiplo",
     );
     await page
+      .getByRole("button", {
+        name: "Mover carro-01.jpg para depois",
+        exact: true,
+      })
+      .click();
+    assert.deepEqual(
+      await page
+        .locator('[name="photos[]"]')
+        .evaluate((el) => [...el.files].map((f) => f.name)),
+      ["carro-02.jpg", "carro-01.jpg"],
+      "ordem da seleção sincroniza com os arquivos do formulário",
+    );
+    await page
+      .getByRole("button", {
+        name: "Remover carro-01.jpg da seleção",
+        exact: true,
+      })
+      .click();
+    assert.equal(
+      await page.locator("#upload-preview img").count(),
+      1,
+      "remove apenas a imagem escolhida da fila",
+    );
+    await page
+      .locator('[name="photos[]"]')
+      .setInputFiles(path.join(__dirname, "../assets/carro-01.jpg"));
+    assert.equal(
+      await page.locator("#upload-preview img").count(),
+      2,
+      "nova seleção mantém os arquivos anteriores",
+    );
+    await page
       .getByRole("button", { name: "Enviar fotografias", exact: true })
       .click();
     await page.waitForURL(/photos=1/);
     assert.equal(await page.locator(".photo-tile").count(), 2);
+    assert(
+      await page
+        .locator(".photo-tile > img")
+        .evaluateAll((images) =>
+          images.every(
+            (img) =>
+              Math.abs(
+                img.getBoundingClientRect().width /
+                  img.getBoundingClientRect().height -
+                  16 / 9,
+              ) < 0.02,
+          ),
+        ),
+      "fotografias do painel em 16:9",
+    );
     return id;
   }
   try {
+    const probe = await context.request.get(base + "/");
+    const testDatabase = process.env.MK3_TEST_DB_NAME || "mk3_test";
+    const expected = crypto
+      .createHash("sha256")
+      .update(testDatabase)
+      .digest("hex");
+    assert.equal(
+      probe.headers()["x-mk3-test-database"],
+      expected,
+      "O servidor precisa confirmar o banco descartável com MK3_TEST_MODE=1 antes de qualquer escrita.",
+    );
+    serverVerified = true;
     // Empty state must render without a fake listing and without carousel errors.
     await page.goto(base + "/");
     assert.equal(await page.locator(".car-card").count(), 0);
@@ -197,6 +257,21 @@ if (!base || !["localhost", "127.0.0.1"].includes(new URL(base).hostname))
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(base + "/");
     await checkNoOverflow("home mobile sem overflow");
+    assert(
+      await page
+        .locator(".car-photo")
+        .evaluateAll((items) =>
+          items.every(
+            (el) =>
+              Math.abs(
+                el.getBoundingClientRect().width /
+                  el.getBoundingClientRect().height -
+                  16 / 9,
+              ) < 0.02,
+          ),
+        ),
+      "cards móveis em 16:9",
+    );
     assert(!(await page.locator(".main-nav").isVisible()));
     await page.locator(".menu-toggle").click();
     assert(await page.locator(".main-nav").isVisible());
@@ -233,17 +308,19 @@ if (!base || !["localhost", "127.0.0.1"].includes(new URL(base).hostname))
     );
   } finally {
     // Remove only the vehicle fixtures created by this test, using authenticated routes.
-    await page.goto(base + "/admin/index.php");
-    const csrf = await page
-      .locator('input[name="csrf"]')
-      .first()
-      .inputValue()
-      .catch(() => null);
-    if (csrf)
-      for (const id of ids)
-        await context.request.post(base + "/admin/delete.php", {
-          form: { csrf, id },
-        });
+    if (serverVerified) {
+      await page.goto(base + "/admin/index.php");
+      const csrf = await page
+        .locator('input[name="csrf"]')
+        .first()
+        .inputValue()
+        .catch(() => null);
+      if (csrf)
+        for (const id of ids)
+          await context.request.post(base + "/admin/delete.php", {
+            form: { csrf, id },
+          });
+    }
     await browser.close();
   }
 })().catch((error) => {

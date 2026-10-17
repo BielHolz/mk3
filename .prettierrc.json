@@ -1,0 +1,4 @@
+{
+  "phpVersion": "8.2",
+  "overrides": [{ "files": "*.php", "options": { "tabWidth": 4 } }]
+}

@@ -35,6 +35,7 @@ $ids = [];
 $adminId = null;
 $assertions = 0;
 $failed = false;
+$serverVerified = false;
 function expect(bool $ok, string $label): void
 {
     global $assertions;
@@ -102,6 +103,18 @@ function scalar(string $sql, array $args = []): mixed
     return $s->fetchColumn();
 }
 try {
+    $probe = request("/");
+    if (
+        !str_contains(
+            strtolower($probe["headers"]),
+            "x-mk3-test-database: " . hash("sha256", $config["db_name"]),
+        )
+    ) {
+        throw new RuntimeException(
+            "Servidor HTTP não confirmou o banco descartável correto. Defina MK3_TEST_MODE=1 apenas na instância de testes. Nenhum dado foi enviado.",
+        );
+    }
+    $serverVerified = true;
     $r = request("/instalar.php");
     expect($r["code"] === 200, "instalador local disponível");
     $csrf = token($r);
@@ -118,6 +131,16 @@ try {
         "criação do primeiro administrador",
     );
     $adminId = (int) scalar("SELECT id FROM users WHERE email=?", [$email]);
+    expect(
+        (password_get_info(
+            (string) scalar("SELECT password_hash FROM users WHERE id=?", [
+                $adminId,
+            ]),
+        )["options"]["cost"] ??
+            0) >=
+            12,
+        "hash mantém custo mínimo 12 no PHP 8.2",
+    );
     expect(
         request("/instalar.php")["code"] === 403,
         "instalador bloqueado após primeira conta",
@@ -149,7 +172,14 @@ try {
         "cookie de sessão protegido",
     );
     $secondCsrf = token(request("/admin/login.php", null, false));
-    expect(request("/admin/login.php", ["csrf"=>$secondCsrf,"email"=>$email,"password"=>$password],false)["code"]===303,"segunda sessão autenticada");
+    expect(
+        request(
+            "/admin/login.php",
+            ["csrf" => $secondCsrf, "email" => $email, "password" => $password],
+            false,
+        )["code"] === 303,
+        "segunda sessão autenticada",
+    );
     $csrf = token(request("/admin/edit.php"));
     $vehicle = [
         "csrf" => $csrf,
@@ -203,6 +233,11 @@ try {
                 "12345.67",
         "validação não sobrescreve valores válidos",
     );
+    $invalidForm=array_replace($vehicle,['price'=>'-1']);
+    unset($invalidForm['featured']);
+    $invalidResponse=request('/admin/edit.php?id='.$id,$invalidForm);
+    preg_match('/<input\b(?=[^>]*name="featured")[^>]*>/s',$invalidResponse['body'],$featuredField);
+    expect(isset($featuredField[0]) && !preg_match('/\schecked(?:\s|>|=)/i',$featuredField[0]),'formulário inválido preserva destaque desmarcado sem alterar o banco');
     $r = request("/?q=Fixture");
     expect(
         $r["code"] === 200 &&
@@ -240,21 +275,51 @@ try {
         request("/veiculo.php?id[]=1")["code"] === 404,
         "identificador malformado rejeitado",
     );
-    $emptyDetail=request("/veiculo.php?id=".$id);
-    expect(!str_contains($emptyDetail["body"],"placeholder-thumb.svg"),"veículo sem fotos usa miniatura existente");
-    expect(request("/assets/placeholder.svg")["code"]===200,"marcador neutro de foto acessível");
+    $emptyDetail = request("/veiculo.php?id=" . $id);
+    expect(
+        !str_contains($emptyDetail["body"], "placeholder-thumb.svg"),
+        "veículo sem fotos usa miniatura existente",
+    );
+    expect(
+        request("/assets/placeholder.svg")["code"] === 200,
+        "marcador neutro de foto acessível",
+    );
     $image = imagecreatetruecolor(80, 60);
     imagefill($image, 0, 0, imagecolorallocate($image, 200, 30, 45));
     $imageFile = tempnam(sys_get_temp_dir(), "mk3-img-");
     imagepng($image, $imageFile);
     imagedestroy($image);
     $temp[] = $imageFile;
+    // JPEG real com orientação EXIF 6: a conversão deve girar antes de remover metadados.
+    $jpeg = tempnam(sys_get_temp_dir(), "mk3-jpeg-");
+    $source = imagecreatefrompng($imageFile);
+    imagejpeg($source, $jpeg, 90);
+    imagedestroy($source);
+    $exif =
+        "Exif\0\0II" .
+        pack("v", 42) .
+        pack("V", 8) .
+        pack("v", 1) .
+        pack("vvV", 0x0112, 3, 1) .
+        pack("v", 6) .
+        "\0\0" .
+        pack("V", 0);
+    $bytes = file_get_contents($jpeg);
+    file_put_contents(
+        $jpeg,
+        substr($bytes, 0, 2) .
+            "\xff\xe1" .
+            pack("n", strlen($exif) + 2) .
+            $exif .
+            substr($bytes, 2),
+    );
+    $temp[] = $jpeg;
     $upload = [
         "csrf" => $csrf,
         "vehicle_id" => $id,
         "action" => "upload",
         "photos[0]" => new CURLFile($imageFile, "image/png", "one.png"),
-        "photos[1]" => new CURLFile($imageFile, "image/png", "two.png"),
+        "photos[1]" => new CURLFile($jpeg, "image/jpeg", "two.jpg"),
     ];
     expect(
         request("/admin/photo.php", $upload)["code"] === 303,
@@ -262,12 +327,39 @@ try {
     );
     $photos = car_photos($id);
     expect(count($photos) === 2, "duas fotografias associadas");
+    $oriented = getimagesize(dirname(__DIR__) . "/" . $photos[1]["path"]);
+    expect(
+        $oriented[0] === 144 && $oriented[1] === 81,
+        "orientação EXIF aplicada antes da conversão WebP",
+    );
     expect(
         is_file(dirname(__DIR__) . "/" . thumbnail_path($photos[0]["path"])),
         "miniatura otimizada gerada",
     );
     $info = getimagesize(dirname(__DIR__) . "/" . $photos[0]["path"]);
     expect($info["mime"] === "image/webp", "imagem reprocessada para WebP");
+    expect(
+        $info[0] * 9 === $info[1] * 16 && $info[0] <= 1920,
+        "foto de veículo WebP em 16:9",
+    );
+    $thumbInfo = getimagesize(
+        dirname(__DIR__) . "/" . thumbnail_path($photos[0]["path"]),
+    );
+    expect(
+        $thumbInfo[0] * 9 === $thumbInfo[1] * 16 && $thumbInfo[0] <= 480,
+        "miniatura WebP em 16:9",
+    );
+    $decoded = imagecreatefromwebp(dirname(__DIR__) . "/" . $photos[0]["path"]);
+    $corner = imagecolorsforindex($decoded, imagecolorat($decoded, 0, 0));
+    $center = imagecolorsforindex(
+        $decoded,
+        imagecolorat($decoded, (int) ($info[0] / 2), (int) ($info[1] / 2)),
+    );
+    expect(
+        $corner["red"] < 50 && $center["red"] > 150,
+        "canvas contém foto completa com margens neutras",
+    );
+    imagedestroy($decoded);
     $r = request("/admin/photo.php", [
         "csrf" => $csrf,
         "vehicle_id" => $id,
@@ -298,6 +390,19 @@ try {
             count(glob(dirname(__DIR__) . "/uploads/*.webp")) ===
                 count($before),
         "lote inválido reverte banco e arquivos",
+    );
+    $excess = ["csrf" => $csrf, "vehicle_id" => $id, "action" => "upload"];
+    for ($i = 0; $i < 11; $i++) {
+        $excess["photos[" . $i . "]"] = new CURLFile(
+            $imageFile,
+            "image/png",
+            "extra-" . $i . ".png",
+        );
+    }
+    expect(
+        request("/admin/photo.php", $excess)["code"] === 422 &&
+            count(car_photos($id)) === 2,
+        "limite de 12 fotos considera as já cadastradas",
     );
     $r = request(
         "/admin/edit.php",
@@ -447,6 +552,12 @@ try {
             "arquivo excluído com veículo",
         );
     }
+    expect(
+        !password_rehash_needed(
+            password_hash("fixture-password", PASSWORD_BCRYPT, ["cost" => 13]),
+        ),
+        "hash mais forte não é rebaixado ao trocar versão do PHP",
+    );
     $newPassword = bin2hex(random_bytes(18));
     $r = request("/admin/account.php", [
         "csrf" => $csrf,
@@ -458,7 +569,10 @@ try {
         str_contains($r["body"], "Senha atualizada."),
         "troca de senha real",
     );
-    expect(request("/admin/index.php",null,false)["code"]===303,"troca de senha invalida outra sessão");
+    expect(
+        request("/admin/index.php", null, false)["code"] === 303,
+        "troca de senha invalida outra sessão",
+    );
     $csrf = token(request("/admin/account.php"));
     expect(
         request("/admin/logout.php", ["csrf" => $csrf])["code"] === 303,
@@ -510,8 +624,10 @@ try {
             ->prepare("DELETE FROM users WHERE id=?")
             ->execute([$adminId]);
     }
-    db()->exec("DELETE FROM store_settings");
-    db()->exec("DELETE FROM login_attempts");
+    if ($serverVerified) {
+        db()->exec("DELETE FROM store_settings");
+        db()->exec("DELETE FROM login_attempts");
+    }
     foreach (array_merge([$cookies, $anonymous], $temp) as $file) {
         if (is_file($file)) {
             unlink($file);

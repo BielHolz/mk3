@@ -49,6 +49,12 @@ if (PHP_SAPI !== "cli") {
     ]);
     session_start();
     header("X-Content-Type-Options: nosniff");
+    if (
+        getenv("MK3_TEST_MODE") === "1" &&
+        str_ends_with($config["db_name"], "_test")
+    ) {
+        header("X-MK3-Test-Database: " . hash("sha256", $config["db_name"]));
+    }
     header("X-Frame-Options: DENY");
     header("Referrer-Policy: strict-origin-when-cross-origin");
     header("Permissions-Policy: camera=(), microphone=(), geolocation=()");
@@ -482,14 +488,28 @@ function audit_target(string $target): string
 }
 function display_date(string $date): string
 {
-    return new DateTimeImmutable($date, new DateTimeZone("UTC"))
+    return (new DateTimeImmutable($date, new DateTimeZone("UTC")))
         ->setTimezone(new DateTimeZone("America/Sao_Paulo"))
         ->format("d/m/Y H:i");
 }
 function public_thumbnail(string $path): string
 {
     $path = photo_path($path);
-    if (!str_starts_with($path, 'uploads/')) return $path;
+    if (!str_starts_with($path, "uploads/")) {
+        return $path;
+    }
     $thumb = preg_replace('/\.(jpg|png|webp)$/D', '-thumb.$1', $path);
-    return is_file(dirname(__DIR__).'/'.$thumb) ? $thumb : $path;
+    return is_file(dirname(__DIR__) . "/" . $thumb) ? $thumb : $path;
+}
+
+function hash_password(string $password): string
+{
+    // Custo estável no PHP 8.2/8.4; nunca dependa de defaults que variam entre versões.
+    return password_hash($password, PASSWORD_BCRYPT, ["cost" => 12]);
+}
+function password_rehash_needed(string $hash): bool
+{
+    $info = password_get_info($hash);
+    return $info["algoName"] === "bcrypt" &&
+        ($info["options"]["cost"] ?? 0) < 12;
 }

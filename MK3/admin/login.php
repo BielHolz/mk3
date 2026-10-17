@@ -50,19 +50,16 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $user["password_hash"] ??
                         '$2y$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi.',
                 );
-                if ($valid && $user && strlen($pass) <= 72 && strlen($email) <= 190) {
-                    if (
-                        password_needs_rehash(
-                            $user["password_hash"],
-                            PASSWORD_DEFAULT,
-                        )
-                    ) {
+                if (
+                    $valid &&
+                    $user &&
+                    strlen($pass) <= 72 &&
+                    strlen($email) <= 190
+                ) {
+                    if (password_rehash_needed($user["password_hash"])) {
                         $pdo->prepare(
                             "UPDATE users SET password_hash=? WHERE id=?",
-                        )->execute([
-                            password_hash($pass, PASSWORD_DEFAULT),
-                            $user["id"],
-                        ]);
+                        )->execute([hash_password($pass), $user["id"]]);
                     }
                     session_regenerate_id(true);
                     $_SESSION = [
@@ -79,7 +76,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             }
         } finally {
             $pdo->query("SELECT RELEASE_LOCK('mk3_login_guard')");
-        };
+        }
     }
     if (!empty($success)) {
         go("index.php");

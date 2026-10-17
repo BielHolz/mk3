@@ -1706,3 +1706,90 @@ dialog::backdrop {
     transform: none;
   }
 }
+
+/* Fotografias de veículos: mesmo enquadramento visual, sem alterar arquivos legados. */
+.hero-frame,
+.car-photo,
+.vehicle-main,
+.photo-tile > img,
+.upload-preview .preview-tile > img {
+  aspect-ratio: 16 / 9;
+}
+.hero-frame > img,
+.car-photo img,
+.photo-tile > img,
+.upload-preview .preview-tile > img {
+  object-fit: contain;
+  background: #141518;
+}
+.vehicle-thumbs img {
+  width: 112px;
+  height: 63px;
+  object-fit: contain;
+  background: #141518;
+}
+.upload-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+}
+.upload-preview .preview-summary,
+.upload-preview .preview-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+}
+.preview-tile {
+  border: 1px solid var(--line);
+  background: #0e0f12;
+  padding: 10px;
+  min-width: 0;
+}
+.upload-preview .preview-tile > img {
+  width: 100%;
+  height: auto;
+  border: 0;
+}
+.preview-name {
+  margin: 10px 0 3px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.preview-size {
+  color: var(--muted);
+  font-size: 10px;
+}
+.preview-actions {
+  display: flex;
+  gap: 5px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.preview-action {
+  border: 1px solid #ffffff25;
+  background: #202127;
+  color: #fff;
+  min-height: 36px;
+  min-width: 36px;
+  padding: 6px 9px;
+  font-size: 11px;
+}
+.preview-action:hover:not(:disabled) {
+  background: #34343e;
+}
+.preview-tile.is-invalid {
+  border-color: #ed1c2e;
+}
+.preview-error {
+  color: #ffb6bf;
+}
+.table-vehicle img {
+  width: 96px;
+  height: 54px;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+}
+.vehicle-main,
+.photo-tile > img {
+  height: auto;
+}

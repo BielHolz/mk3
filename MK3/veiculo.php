@@ -25,7 +25,7 @@ site_head(
     $images[0],
 ) ?>" alt="<?= h(
     $car["title"],
-) ?> — foto 1" width="1000" height="750"></button><div class="gallery-controls"><button type="button" data-gallery-step="-1" aria-label="Foto anterior" <?= count(
+) ?> — foto 1" width="1280" height="720"></button><div class="gallery-controls"><button type="button" data-gallery-step="-1" aria-label="Foto anterior" <?= count(
      $images,
  ) < 2
      ? "disabled"
@@ -45,7 +45,7 @@ site_head(
     : "false" ?>"><img src="<?= h(
     public_thumbnail($path),
 ) ?>" data-fallback="<?= h($path) ?>" alt="Miniatura <?= $i +
-    1 ?>" width="120" height="90" loading="lazy"></button><?php endforeach; ?></div></section><section class="vehicle-summary"><span class="pill <?= h(
+    1 ?>" width="128" height="72" loading="lazy"></button><?php endforeach; ?></div></section><section class="vehicle-summary"><span class="pill <?= h(
     $car["status"],
 ) ?>"><?= h(status_labels()[$car["status"]]) ?></span><p class="eyebrow"><?= h(
     $car["brand"],

@@ -60,11 +60,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 }
                 $pdo->prepare(
                     "INSERT INTO users(name,email,password_hash) VALUES(?,?,?)",
-                )->execute([
-                    $name,
-                    $email,
-                    password_hash($pass, PASSWORD_DEFAULT),
-                ]);
+                )->execute([$name, $email, hash_password($pass)]);
                 $pdo->commit();
                 $success = true;
             } catch (Throwable $e) {
@@ -76,7 +72,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 error_log("MK3 installer: " . get_class($e));
             } finally {
                 $pdo->query("SELECT RELEASE_LOCK('mk3_first_admin')");
-            };
+            }
         }
     }
 }
