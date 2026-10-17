@@ -1,12 +1,204 @@
-<?php require __DIR__.'/app/core.php';require __DIR__.'/app/layout.php';
-$rows=db()->query("SELECT * FROM vehicles WHERE status='available' ORDER BY featured DESC,created_at DESC,id DESC")->fetchAll();
-$featured=array_values(array_filter($rows,fn($r)=>(int)$r['featured']===1));if(!$featured)$featured=array_slice($rows,0,4);
-$slides=array_map(fn($r)=>['src'=>cover((int)$r['id']),'title'=>$r['title'],'link'=>'veiculo.php?id='.$r['id']],$featured);
-site_head('Seu sonho. Nossa paixão.');?>
-<main><section class="hero" id="inicio"><div class="hero-bg" id="hero-background"></div><div class="hero-grain"></div><div class="wrap hero-content"><div class="hero-copy"><div class="eyebrow">MK3 Multimarcas • Joinville / SC</div><h1>Seu sonho.<br><em>Nossa</em><br>paixão.</h1><p>Não é apenas sobre encontrar um carro. É sobre encontrar a próxima história que você vai viver.</p><div class="hero-actions"><a href="#estoque" class="button red">EXPLORAR ESTOQUE ↗</a><a href="#sobre" class="button outline">CONHEÇA A MK3 →</a></div></div><div class="hero-visual"><div class="hero-halo"></div><div class="hero-vehicle" id="hero-box"><a id="hero-link" href="<?=h($slides[0]['link']??'#estoque')?>"><img id="hero-img" src="<?=h($slides[0]['src']??'assets/carro-08.jpg')?>" alt="Carro em destaque"></a><span class="hero-label" id="hero-name"><?=h($slides[0]['title']??'SELEÇÃO MK3')?></span></div></div></div><div class="wrap hero-info"><div class="no"><strong id="hero-index">01</strong> / <?=str_pad((string)max(1,count($slides)),2,'0',STR_PAD_LEFT)?><div class="fineprint">DESTAQUES MK3</div></div><div class="auto-progress" id="hero-dots"></div></div></section>
-<div class="divider-band"><div class="wrap stats"><div class="stat"><strong>COMPRA</strong><span>Seu próximo carro está aqui</span></div><div class="stat"><strong>VENDA</strong><span>Anuncie com a MK3</span></div><div class="stat"><strong>TROCA</strong><span>Negocie seu usado</span></div><div class="stat"><strong>FINANCIA</strong><span>Consulte as condições</span></div></div></div>
-<section class="section" id="estoque"><div class="wrap"><div class="section-head"><div><div class="eyebrow">Estoque atualizado pelo painel</div><h2>Escolha seu<br><i>próximo carro.</i></h2></div><p class="section-lead">Confira os veículos disponíveis e fale diretamente com a MK3.</p></div><div class="inventory-tools"><input class="filter" id="filter" placeholder="Pesquisar por modelo, marca..." aria-label="Pesquisar veículos"><select class="filter" id="order" aria-label="Ordenar"><option value="recent">Mais recentes</option><option value="az">Nome A–Z</option><option value="asc">Menor preço</option><option value="desc">Maior preço</option></select></div>
-<div class="inventory-grid" id="stock-grid"><?php foreach($rows as $car):?><article class="car-card" data-title="<?=h(mb_strtolower($car['title'].' '.$car['brand'].' '.$car['model']))?>" data-price="<?=h($car['price']??'999999999')?>" data-id="<?=h($car['id'])?>"><div class="car-photo"><img src="<?=h(cover((int)$car['id']))?>" alt="<?=h($car['title'])?>" loading="lazy"><span class="car-tag"><?=!empty($car['featured'])?'DESTAQUE':'DISPONÍVEL'?></span></div><div class="car-content"><h3><?=h($car['title'])?></h3><p class="description"><?=h($car['brand'])?> <?=h($car['model'])?></p><div class="car-specs"><span><?=h($car['year_model']?:'Ano sob consulta')?></span><span><?=isset($car['mileage'])?number_format((int)$car['mileage'],0,',','.').' km':'KM sob consulta'?></span><span><?=h($car['transmission']?:'Câmbio sob consulta')?></span></div><div class="bottom"><strong class="price"><?=h(money($car['price']))?></strong><a class="view-btn" href="veiculo.php?id=<?=$car['id']?>">Ver detalhes →</a></div></div></article><?php endforeach;?></div><?php if(!$rows):?><div class="empty-state">Nenhum veículo publicado no momento. Cadastre carros pelo painel administrativo.</div><?php endif;?></div></section>
-<section class="section about" id="sobre"><div class="wrap"><div class="about-art"><img src="assets/carro-11.jpg" alt="MK3 Multimarcas"><span class="big-number">MK3.</span></div><div class="about-copy"><div class="eyebrow">Conheça a MK3</div><h2>SEU NOVO<br><i>CAMINHO.</i></h2><p>Compra, venda, troca e financiamento de veículos em Joinville/SC. Converse com a equipe sobre o carro que combina com você.</p><a class="button red" href="<?=h(wa('uma negociação'))?>" target="_blank" rel="noopener noreferrer">CONVERSAR NO WHATSAPP ↗</a></div></div></section>
-<section class="section contact" id="contato"><div class="wrap"><div class="eyebrow">Vamos conversar?</div><h2>SEU PRÓXIMO<br><i>CARRO ESPERA.</i></h2><p>Rua São Paulo, 3132 • Itaum • Joinville/SC<br>Consulte horário de atendimento e disponibilidade.</p><a class="button red" href="<?=h(wa('um carro'))?>" target="_blank" rel="noopener noreferrer">FALAR COM A MK3 ↗</a></div></section></main>
-<script id="slide-data" type="application/json"><?=json_encode($slides,JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)?></script><script src="assets/site.js" defer></script><?php site_end(); ?>
+<?php
+require __DIR__ . "/app/core.php";
+require __DIR__ . "/app/layout.php";
+$s = settings();
+$catalog = catalog($_GET);
+$featured = db()
+    ->query(
+        "SELECT v.*,(SELECT path FROM photos WHERE vehicle_id=v.id ORDER BY position,id LIMIT 1) cover FROM vehicles v WHERE status IN ('available','reserved') AND featured=1 ORDER BY featured_order,id DESC LIMIT 12",
+    )
+    ->fetchAll();
+$slides = array_map(
+    fn($v) => [
+        "src" => photo_path($v["cover"]),
+        "title" => $v["title"],
+        "link" => "veiculo.php?id=" . $v["id"],
+    ],
+    $featured,
+);
+$hero = $slides[0] ?? [
+    "src" => photo_path($s["hero_image"]),
+    "title" => "Conheça nosso estoque",
+    "link" => "#estoque",
+];
+$facets = [];
+foreach (["brand", "fuel", "transmission"] as $field) {
+    $facets[$field] = db()
+        ->query(
+            "SELECT DISTINCT $field FROM vehicles WHERE status IN ('available','reserved') AND $field<>'' ORDER BY $field",
+        )
+        ->fetchAll(PDO::FETCH_COLUMN);
+}
+site_head($s["seo_title"]);
+?><main id="conteudo"><section class="hero" id="inicio" aria-label="Veículos em destaque" aria-roledescription="carrossel"><div class="hero-glow"></div><div class="wrap hero-content"><div class="hero-copy"><div class="eyebrow">MK3 Multimarcas • Joinville / SC</div><h1>Seu sonho.<br><em>Nossa</em><br>paixão.</h1><p><?= h(
+    $s["hero_text"],
+) ?></p><div class="hero-actions"><a href="#estoque" class="button red">Explorar estoque ↗</a><a href="<?= h(
+    wa("um veículo"),
+) ?>" class="button outline" target="_blank" rel="noopener noreferrer">Fale com a MK3</a></div></div><div class="hero-visual" id="hero-stage"><div class="hero-halo"></div><a class="hero-frame" id="hero-link" href="<?= h(
+    $hero["link"],
+) ?>"><img id="hero-img" src="<?= h($hero["src"]) ?>" alt="<?= h(
+    $hero["title"],
+) ?>" width="900" height="640" fetchpriority="high"><img id="hero-next" src="<?= h(
+    $hero["src"],
+) ?>" alt="" width="900" height="640" aria-hidden="true"><span class="hero-label" id="hero-name"><?= h(
+    $hero["title"],
+) ?></span></a><div class="hero-controls"><span class="slide-count"><strong id="hero-index"><?= count(
+    $slides,
+)
+    ? "01"
+    : "00" ?></strong> / <?= str_pad(
+    (string) count($slides),
+    2,
+    "0",
+    STR_PAD_LEFT,
+) ?></span><div id="hero-dots" class="hero-dots" aria-label="Escolher destaque"></div><div class="arrow-group"><button type="button" id="hero-prev" aria-label="Destaque anterior" <?= count(
+    $slides,
+) < 2
+    ? "disabled"
+    : "" ?>>←</button><button type="button" id="hero-pause" aria-label="Pausar troca automática" aria-pressed="false" <?= count(
+    $slides,
+) < 2
+    ? "disabled"
+    : "" ?>>Ⅱ</button><button type="button" id="hero-forward" aria-label="Próximo destaque" <?= count(
+    $slides,
+) < 2
+    ? "disabled"
+    : "" ?>>→</button></div></div><p class="fineprint" id="hero-status" aria-live="polite"><?= count(
+    $slides,
+)
+    ? "Destaques selecionados pela loja."
+    : "Novos destaques em breve. Explore o estoque disponível." ?></p></div></div></section>
+<div class="divider-band"><div class="wrap stats"><?php foreach (
+    [
+        "Compra" => "Seu próximo carro está aqui",
+        "Venda" => "Converse com nossa equipe",
+        "Troca" => "Negocie seu usado",
+        "Financia" => "Consulte as condições",
+    ]
+    as $label => $text
+): ?><div><strong><?= h($label) ?></strong><span><?= h(
+    $text,
+) ?></span></div><?php endforeach; ?></div></div>
+<section class="section wrap" id="estoque"><div class="section-head"><div><div class="eyebrow">Estoque atualizado</div><h2>Escolha seu<br><em>próximo carro.</em></h2></div><p class="section-lead">Encontre o veículo para sua próxima história. Consulte os detalhes e converse com a equipe.</p></div>
+<form method="get" action="index.php#estoque" class="inventory-filters" role="search" aria-label="Filtrar estoque"><label class="search-field">Buscar veículo<input type="search" name="q" value="<?= h(
+    input($_GET, "q"),
+) ?>" maxlength="100" placeholder="Nome, marca, modelo ou versão"></label><?php
+foreach (
+    ["brand" => "Marca", "fuel" => "Combustível", "transmission" => "Câmbio"]
+    as $key => $label
+): ?><label><?= h($label) ?><select name="<?= h(
+    $key,
+) ?>"><option value="">Todos</option><?php foreach (
+    $facets[$key]
+    as $value
+): ?><option value="<?= h($value) ?>" <?= input($_GET, $key) === $value
+    ? "selected"
+    : "" ?>><?= h(
+    $value,
+) ?></option><?php endforeach; ?></select></label><?php endforeach;
+foreach (
+    [
+        "min_price" => 'Preço mínimo (R$)',
+        "max_price" => 'Preço máximo (R$)',
+        "min_year" => "Ano mínimo",
+        "max_year" => "Ano máximo",
+    ]
+    as $key => $label
+): ?><label><?= h($label) ?><input type="number" min="<?= str_contains(
+    $key,
+    "year",
+)
+    ? "1900"
+    : "0" ?>" max="<?= str_contains($key, "year")
+    ? "2200"
+    : "99999999" ?>" name="<?= h($key) ?>" value="<?= h(
+    input($_GET, $key),
+) ?>"></label><?php endforeach;
+?><label>Ordenar por<select name="sort"><?php foreach (
+    [
+        "recent" => "Mais recentes",
+        "price_asc" => "Menor preço",
+        "price_desc" => "Maior preço",
+        "year" => "Ano mais novo",
+    ]
+    as $k => $label
+): ?><option value="<?= $k ?>" <?= input($_GET, "sort", "recent") === $k
+    ? "selected"
+    : "" ?>><?= h(
+    $label,
+) ?></option><?php endforeach; ?></select></label><div class="filter-actions"><button class="button red">Filtrar estoque</button><a href="index.php#estoque" class="text-link">Limpar filtros</a></div></form>
+<p class="muted" role="status"><?= $catalog[
+    "total"
+] ?> veículo(s) encontrado(s)</p><div class="inventory-grid" id="stock-grid"><?php foreach (
+     $catalog["rows"]
+     as $v
+ ) {
+     vehicle_card($v);
+ } ?></div><?php if (
+    !$catalog["total"]
+): ?><div class="empty-state"><h3>Nenhum veículo encontrado.</h3><p>Experimente outros filtros ou fale com a equipe.</p><a class="text-link" href="<?= h(
+    wa("o estoque"),
+) ?>" target="_blank" rel="noopener noreferrer">Consultar a loja ↗</a></div><?php endif; ?>
+<?php if (
+    $catalog["pages"] > 1
+): ?><nav class="pagination" aria-label="Páginas do estoque"><?php for (
+    $p = max(1, $catalog["page"] - 2);
+    $p <= min($catalog["pages"], $catalog["page"] + 2);
+    $p++
+):
+
+    $query = [];
+    foreach (
+        [
+            "q",
+            "brand",
+            "fuel",
+            "transmission",
+            "min_price",
+            "max_price",
+            "min_year",
+            "max_year",
+            "sort",
+        ]
+        as $key
+    ) {
+        if (input($_GET, $key) !== "") {
+            $query[$key] = input($_GET, $key);
+        }
+    }
+    $query["page"] = $p;
+    ?><a href="?<?= h(http_build_query($query)) ?>#estoque" <?= $p ===
+$catalog["page"]
+    ? 'aria-current="page"'
+    : "" ?>><?= $p ?></a><?php
+endfor; ?></nav><?php endif; ?></section>
+<section class="section about" id="sobre"><div class="wrap about-layout"><div class="about-brand reveal"><img src="assets/logo-mk3-oficial.png" width="460" height="260" alt="Logo original MK3 Multimarcas"><span>Seu sonho. Nossa paixão.</span></div><div class="reveal"><div class="eyebrow">Conheça a MK3</div><h2>Seu novo<br><em>caminho.</em></h2><p class="body-copy"><?= nl2br(
+    h($s["about"]),
+) ?></p><a class="button red" href="<?= h(
+    wa("uma negociação"),
+) ?>" target="_blank" rel="noopener noreferrer">Conversar com a equipe ↗</a></div></div></section>
+<section class="section wrap" id="contato"><div class="section-head"><div><div class="eyebrow">Vamos conversar?</div><h2>Sua próxima<br><em>história começa aqui.</em></h2></div><a class="button red" href="<?= h(
+    wa("um carro"),
+) ?>" target="_blank" rel="noopener noreferrer">Atendimento WhatsApp ↗</a></div><div class="contact-grid"><div><h3>Visite a loja</h3><p><?= nl2br(
+    h($s["address"]),
+) ?></p></div><div><h3>Horários</h3><p><?= nl2br(
+    h($s["hours"]),
+) ?></p></div><div><h3>Fale com a MK3</h3><?php
+if ($s["phone"]): ?><p><a href="tel:<?= h(
+    preg_replace("/[^+0-9]/", "", $s["phone"]),
+) ?>"><?= h($s["phone"]) ?></a></p><?php endif;
+if ($s["instagram"]): ?><a class="text-link" href="<?= h(
+    $s["instagram"],
+) ?>" target="_blank" rel="noopener noreferrer">Instagram ↗</a><?php endif;
+?></div></div></section></main>
+<script type="application/json" id="slide-data" nonce="<?= h(
+    nonce(),
+) ?>"><?= json_encode(
+    $slides,
+    JSON_HEX_TAG |
+        JSON_HEX_AMP |
+        JSON_HEX_APOS |
+        JSON_HEX_QUOT |
+        JSON_UNESCAPED_UNICODE |
+        JSON_THROW_ON_ERROR,
+) ?></script><script src="assets/site.js" defer></script><?php site_end(); ?>
