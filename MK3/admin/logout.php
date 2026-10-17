@@ -1,0 +1,1 @@
+<?php require 'common.php';if($_SERVER['REQUEST_METHOD']!=='POST'){http_response_code(405);exit;}check_csrf();admin_log('logout');$_SESSION=[];session_regenerate_id(true);session_destroy();go('login.php');

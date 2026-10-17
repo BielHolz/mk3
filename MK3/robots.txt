@@ -1,0 +1,16 @@
+# Solicitações voluntárias a crawlers conhecidos: NÃO é uma barreira de segurança.
+User-agent: GPTBot
+Disallow: /
+User-agent: ClaudeBot
+Disallow: /
+User-agent: Google-Extended
+Disallow: /
+User-agent: CCBot
+Disallow: /
+User-agent: Bytespider
+Disallow: /
+User-agent: *
+Disallow: /admin/
+Disallow: /app/
+Disallow: /uploads/
+Disallow: /instalar.php
